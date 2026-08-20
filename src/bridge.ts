@@ -34,6 +34,7 @@ import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   resolveBridgeScript,
 } from "./bridge-script.js";
+import { CHROME_DEVTOOLS_MCP_SPEC } from "./mcp-package.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -452,7 +453,7 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
 ] as const;
 
 export function buildTransportArgs(): string[] {
-  const args = ["-y", "chrome-devtools-mcp@latest"];
+  const args = ["-y", CHROME_DEVTOOLS_MCP_SPEC];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -587,9 +588,10 @@ export function detectGlobalMcpPath(
  *      `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
  *      If found, spawn `node <path>` directly — starts in ~1-2s vs. the
  *      30s+ npx-bootstrap path.
- *   3. Fall back to `npx -y chrome-devtools-mcp@latest`. On systems with a
- *      slow link or large global cache this can race the bridge's readiness
- *      deadline; install the package globally to skip it:
+ *   3. Fall back to `npx -y chrome-devtools-mcp@<pinned>`. The pin lives in
+ *      `src/mcp-package.ts` and is an exact semver — never `@latest`. On
+ *      systems with a slow link or large global cache this can race the
+ *      bridge's readiness deadline; install the package globally to skip it:
  *        npm install -g chrome-devtools-mcp
  */
 export function resolveTransportSpec(
@@ -600,7 +602,7 @@ export function resolveTransportSpec(
   const mcpPath =
     explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
   if (mcpPath) {
-    // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
+    // Strip the npx prefix `["-y", CHROME_DEVTOOLS_MCP_SPEC]` — direct
     // node spawn doesn't need it.
     return {
       command: process.execPath,

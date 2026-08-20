@@ -21,6 +21,10 @@ import {
   terminateBridgeProcess,
   waitForProcessExit,
 } from "../src/client.js";
+import {
+  CHROME_DEVTOOLS_MCP_NAME,
+  CHROME_DEVTOOLS_MCP_SPEC,
+} from "../src/mcp-package.js";
 
 describe("CdpError", () => {
   it("uses the shared axi-sdk-js error contract", () => {
@@ -308,6 +312,8 @@ describe("buildBridgeEarlyExitError", () => {
     expect(err.message).toContain("exited with code 1");
     const suggestions = err.suggestions.join("\n");
     expect(suggestions).toContain("chrome-devtools-mcp");
+    expect(suggestions).toContain(CHROME_DEVTOOLS_MCP_SPEC);
+    expect(suggestions).not.toContain(`${CHROME_DEVTOOLS_MCP_NAME}@latest`);
     expect(suggestions).not.toContain("hashed-port collision");
     expect(suggestions).not.toContain("another session's bridge");
   });
