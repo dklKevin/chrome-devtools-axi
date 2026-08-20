@@ -45,7 +45,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@toon-format/toon": "^2.1.0",
-    "axi-sdk-js": "^0.1.10"
+    "axi-sdk-js": "^0.1.10",
+    "chrome-devtools-mcp": "1.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
