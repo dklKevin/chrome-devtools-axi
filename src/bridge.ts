@@ -16,6 +16,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
 import {
   createServer,
   type IncomingMessage,
@@ -34,6 +35,11 @@ import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   resolveBridgeScript,
 } from "./bridge-script.js";
+import {
+  CHROME_DEVTOOLS_MCP_BIN,
+  CHROME_DEVTOOLS_MCP_NAME,
+  CHROME_DEVTOOLS_MCP_SPEC,
+} from "./mcp-package.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -452,7 +458,7 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
 ] as const;
 
 export function buildTransportArgs(): string[] {
-  const args = ["-y", "chrome-devtools-mcp@latest"];
+  const args = ["-y", CHROME_DEVTOOLS_MCP_SPEC];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -531,11 +537,29 @@ export function buildTransportArgs(): string[] {
 
 /**
  * Probe interface for {@link detectGlobalMcpPath}. Defaults to real `node:fs`
- * + `npm prefix -g`; injectable for tests.
+ * + `npm prefix -g` + the package-local install; injectable for tests.
+ *
+ * `resolveLocalMcpPath` is optional so existing test probes keep exercising
+ * the global/npx branches — a missing method is treated as "no local install".
  */
 export interface McpPathProbe {
   existsSync: (path: string) => boolean;
   getNpmPrefix: () => string | null;
+  resolveLocalMcpPath?: () => string | null;
+}
+
+/**
+ * Resolve the chrome-devtools-mcp CLI from this package's node_modules
+ * (the exact version pinned in `package.json` / the lockfile).
+ */
+export function detectLocalMcpPath(): string | null {
+  try {
+    return createRequire(import.meta.url).resolve(
+      `${CHROME_DEVTOOLS_MCP_NAME}/${CHROME_DEVTOOLS_MCP_BIN}`,
+    );
+  } catch {
+    return null;
+  }
 }
 
 const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
@@ -550,6 +574,7 @@ const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
       return null;
     }
   },
+  resolveLocalMcpPath: detectLocalMcpPath,
 };
 
 /**
@@ -569,11 +594,8 @@ export function detectGlobalMcpPath(
     prefix,
     "lib",
     "node_modules",
-    "chrome-devtools-mcp",
-    "build",
-    "src",
-    "bin",
-    "chrome-devtools-mcp.js",
+    CHROME_DEVTOOLS_MCP_NAME,
+    ...CHROME_DEVTOOLS_MCP_BIN.split("/"),
   );
   return probe.existsSync(candidate) ? candidate : null;
 }
@@ -583,14 +605,18 @@ export function detectGlobalMcpPath(
  *
  * Resolution order (most → least specific):
  *   1. `CHROME_DEVTOOLS_AXI_MCP_PATH` env var — explicit override, always wins.
- *   2. Auto-detect: probe a globally-installed `chrome-devtools-mcp` via
+ *   2. Local install: the exact `chrome-devtools-mcp` version pinned in
+ *      `package.json` / the lockfile, resolved from this package's
+ *      `node_modules`.
+ *   3. Auto-detect: probe a globally-installed `chrome-devtools-mcp` via
  *      `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
  *      If found, spawn `node <path>` directly — starts in ~1-2s vs. the
  *      30s+ npx-bootstrap path.
- *   3. Fall back to `npx -y chrome-devtools-mcp@latest`. On systems with a
- *      slow link or large global cache this can race the bridge's readiness
- *      deadline; install the package globally to skip it:
- *        npm install -g chrome-devtools-mcp
+ *   4. Fall back to `npx -y chrome-devtools-mcp@<pinned>`. Never `@latest`.
+ *      On systems with a slow link or large global cache this can race the
+ *      bridge's readiness deadline; install the package (or set MCP_PATH)
+ *      to skip it:
+ *        npm install -g chrome-devtools-mcp@<pinned>
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -598,9 +624,11 @@ export function resolveTransportSpec(
   const mcpArgs = buildTransportArgs();
   const explicit = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
   const mcpPath =
-    explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
+    explicit && explicit.length > 0
+      ? explicit
+      : (probe.resolveLocalMcpPath?.() ?? detectGlobalMcpPath(probe));
   if (mcpPath) {
-    // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
+    // Strip the npx prefix `["-y", chrome-devtools-mcp@<pinned>]` — direct
     // node spawn doesn't need it.
     return {
       command: process.execPath,

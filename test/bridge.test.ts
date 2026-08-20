@@ -24,6 +24,11 @@ import {
   resolveTransportSpec,
   type BridgeClient,
 } from "../src/bridge.js";
+import {
+  CHROME_DEVTOOLS_MCP_SPEC,
+  CHROME_DEVTOOLS_MCP_VERSION,
+} from "../src/mcp-package.js";
+import pkg from "../package.json" with { type: "json" };
 
 describe("extractToolText", () => {
   it("joins text blocks and ignores non-text content", () => {
@@ -75,6 +80,20 @@ describe("resolveBridgeScript", () => {
   });
 });
 
+describe("chrome-devtools-mcp pin", () => {
+  it("is an exact x.y.z that matches package.json and is never @latest", () => {
+    expect(CHROME_DEVTOOLS_MCP_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(pkg.dependencies["chrome-devtools-mcp"]).toBe(
+      CHROME_DEVTOOLS_MCP_VERSION,
+    );
+    expect(CHROME_DEVTOOLS_MCP_SPEC).toBe(
+      `chrome-devtools-mcp@${CHROME_DEVTOOLS_MCP_VERSION}`,
+    );
+    expect(CHROME_DEVTOOLS_MCP_SPEC).not.toMatch(/latest/);
+    expect(buildTransportArgs()[1]).toBe(CHROME_DEVTOOLS_MCP_SPEC);
+  });
+});
+
 describe("buildTransportArgs", () => {
   const savedEnv: Record<string, string | undefined> = {};
 
@@ -123,7 +142,7 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toEqual([
       "-y",
-      "chrome-devtools-mcp@latest",
+      CHROME_DEVTOOLS_MCP_SPEC,
       "--isolated",
       "--headless",
       "--chrome-arg=--use-mock-keychain",
@@ -136,7 +155,7 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toEqual([
       "-y",
-      "chrome-devtools-mcp@latest",
+      CHROME_DEVTOOLS_MCP_SPEC,
       "--isolated",
       "--chrome-arg=--use-mock-keychain",
       "--chrome-arg=--password-store=basic",
@@ -385,7 +404,8 @@ describe("resolveTransportSpec", () => {
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
     expect(spec.args[0]).toBe("-y");
-    expect(spec.args[1]).toBe("chrome-devtools-mcp@latest");
+    expect(spec.args[1]).toBe(CHROME_DEVTOOLS_MCP_SPEC);
+    expect(spec.args[1]).not.toMatch(/@latest$/);
     // Default mcp args follow
     expect(spec.args).toContain("--isolated");
     expect(spec.args).toContain("--headless");
@@ -397,9 +417,9 @@ describe("resolveTransportSpec", () => {
     const spec = resolveTransportSpec();
     expect(spec.command).toBe(process.execPath);
     expect(spec.args[0]).toBe("/opt/mcp/build/src/bin/chrome-devtools-mcp.js");
-    // Strips the npx-only `-y, chrome-devtools-mcp@latest` prefix
+    // Strips the npx-only `-y, chrome-devtools-mcp@<pinned>` prefix
     expect(spec.args).not.toContain("-y");
-    expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    expect(spec.args).not.toContain(CHROME_DEVTOOLS_MCP_SPEC);
     // Preserves the mcp-specific args
     expect(spec.args).toContain("--isolated");
     expect(spec.args).toContain("--headless");
@@ -438,7 +458,7 @@ describe("resolveTransportSpec", () => {
       "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
     );
     expect(spec.args).not.toContain("-y");
-    expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    expect(spec.args).not.toContain(CHROME_DEVTOOLS_MCP_SPEC);
     expect(spec.args).toContain("--isolated");
   });
 
@@ -459,6 +479,27 @@ describe("resolveTransportSpec", () => {
     };
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
+  });
+
+  it("default probe uses the lockfile-pinned local install when present", () => {
+    const spec = resolveTransportSpec();
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toMatch(/chrome-devtools-mcp\.js$/);
+    expect(spec.args).not.toContain("-y");
+  });
+
+  it("prefers the lockfile-pinned local install over a global install", () => {
+    const probe = {
+      existsSync: () => true,
+      getNpmPrefix: () => "/usr",
+      resolveLocalMcpPath: () =>
+        "/repo/node_modules/chrome-devtools-mcp/bin.js",
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toBe("/repo/node_modules/chrome-devtools-mcp/bin.js");
+    expect(spec.args).not.toContain("-y");
+    expect(spec.args).not.toContain(CHROME_DEVTOOLS_MCP_SPEC);
   });
 
   it("explicit MCP_PATH always wins over auto-detection", () => {
